@@ -223,7 +223,7 @@ func (proxier *Proxier) syncProxyRules() {
 
 ## ServiceChangeTracker & ServiceMap
 Service更新追踪和ServiceMap
-```
+```go
 type ServiceChangeTracker struct {
     // lock protects items.
     lock sync.Mutex
@@ -271,7 +271,7 @@ func (sm ServiceMap) Update(changes *ServiceChangeTracker) (result UpdateService
 
 ## EndpointChangeTracker & EndpointsMap
 endpoint更新追踪器和EndpointsMap
-```
+```go
 type EndpointChangeTracker struct {
     // lock protects items.
     lock sync.Mutex
@@ -316,6 +316,13 @@ func (ect *EndpointChangeTracker) EndpointSliceUpdate(endpointSlice *discovery.E
 	}
 
 	return changeNeeded
+}
+
+// endpointSliceCache生成endpointsChange
+func (ect *EndpointChangeTracker) checkoutChanges() []*endpointsChange {
+	metrics.EndpointChangesPending.Set(0)
+
+	return ect.endpointSliceCache.checkoutChanges()
 }
 
 type EndpointsMap map[ServicePortName][]Endpoint
