@@ -1,6 +1,7 @@
 # flannel 源码分析
 
 ## subnet.Manager
+子网管理器
 ```go
 type Manager interface {
     // 获取整个集群网络配置 10.214.0.0/16
@@ -113,5 +114,127 @@ func (m *LocalManager) tryAcquireLease(ctx context.Context, config *subnet.Confi
     //在register中创建子网
     exp, err := m.registry.createSubnet(ctx, sn, sn6, attrs, subnetTTL)
     ...
+}
+```
+
+## backend.Manager 
+主机子网后端实现管理器
+```
+// 接口定义
+type Manager interface {
+    GetBackend(backendType string) (Backend, error)
+}
+// 具体实现
+type manager struct {
+    ctx      context.Context
+    // 子网管理器，获取主机子网
+    sm       subnet.Manager
+    extIface *ExternalInterface
+    mux      sync.Mutex
+    // 具体子网后端实现
+    active   map[string]Backend
+    wg       sync.WaitGroup
+}
+```
+
+#### vxlan模式子网后端
+```
+type VXLANBackend struct {
+    // 子网管理器
+    subnetMgr subnet.Manager
+    // 外网接口
+    extIface  *backend.ExternalInterface
+}
+// vxlan网络注册
+func (be *VXLANBackend) RegisterNetwork(ctx context.Context, wg *sync.WaitGroup, config *subnet.Config) (backend.Network, error) {
+    ...
+    // 生成vxlan虚拟设备
+    var dev, v6Dev *vxlanDevice
+    var err error
+    if config.EnableIPv4 {
+        devAttrs := vxlanDeviceAttrs{
+            vni:       uint32(cfg.VNI),
+            name:      fmt.Sprintf("flannel.%v", cfg.VNI),
+            MTU:       cfg.MTU,
+            vtepIndex: be.extIface.Iface.Index,
+            vtepAddr:  be.extIface.IfaceAddr,
+            vtepPort:  cfg.Port,
+            gbp:       cfg.GBP,
+            learning:  cfg.Learning,
+        }
+
+        dev, err = newVXLANDevice(&devAttrs)
+        if err != nil {
+            return nil, err
+        }
+        dev.directRouting = cfg.DirectRouting
+    }
+    ...
+    // 获取子网租约
+    lease, err := be.subnetMgr.AcquireLease(ctx, subnetAttrs)
+    
+    // 通过获取的子网租约配置vxlan设备
+    if config.EnableIPv4 {
+        net, err := config.GetFlannelNetwork(&lease.Subnet)
+        if err != nil {
+            return nil, err
+        }
+        if err := dev.Configure(ip.IP4Net{IP: lease.Subnet.IP, PrefixLen: 32}, net); err != nil {
+            return nil, fmt.Errorf("failed to configure interface %s: %w", dev.link.Attrs().Name, err)
+        }
+    }
+    ...
+    // 生成主机网络
+    return newNetwork(be.subnetMgr, be.extIface, dev, v6Dev, ip.IP4Net{}, lease, cfg.MTU)
+}
+
+type network struct {
+    backend.SimpleNetwork
+    dev       *vxlanDevice
+    v6Dev     *vxlanDevice
+    subnetMgr subnet.Manager
+    mtu       int
+}
+// 通过WatchLeases获取subnet更新事件，设置网络
+func (nw *network) handleSubnetEvents(batch []subnet.Event) {
+	for _, event := range batch {
+	    ...
+		switch event.Type {
+		case subnet.EventAdded:
+			if event.Lease.EnableIPv4 {
+				if directRoutingOK {
+                    ...
+				} else {
+                    // 增加arp记录
+					if err := retry.Do(func() error {
+						return nw.dev.AddARP(neighbor{IP: sn.IP, MAC: net.HardwareAddr(vxlanAttrs.VtepMAC)})
+					}); err != nil {
+						log.Error("AddARP failed: ", err)
+						continue
+					}
+                    // 增加fdb记录
+					if err := retry.Do(func() error {
+						return nw.dev.AddFDB(neighbor{IP: attrs.PublicIP, MAC: net.HardwareAddr(vxlanAttrs.VtepMAC)})
+					}); err != nil {
+					    ...
+					}
+
+					// Set the route - the kernel would ARP for the Gw IP address if it hadn't already been set above so make sure
+					// this is done last.
+					// 增加路由记录
+					if err := retry.Do(func() error {
+						return netlink.RouteReplace(&vxlanRoute)
+					}); err != nil {
+                        ...
+					}
+				}
+			}
+            ...
+		case subnet.EventRemoved:
+        ...
+		default:
+			log.Error("internal error: unknown event type: ", int(event.Type))
+		}
+	}
 }
 ```
