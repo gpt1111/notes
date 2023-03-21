@@ -198,30 +198,30 @@ type network struct {
 // 通过WatchLeases获取subnet更新事件，设置网络
 func (nw *network) handleSubnetEvents(batch []subnet.Event) {
 	for _, event := range batch {
-	    ...
+        ...
 		switch event.Type {
 		case subnet.EventAdded:
 			if event.Lease.EnableIPv4 {
 				if directRoutingOK {
-                    ...
+                   ...
 				} else {
-                    // 增加arp记录
+                    // 设置arp
 					if err := retry.Do(func() error {
 						return nw.dev.AddARP(neighbor{IP: sn.IP, MAC: net.HardwareAddr(vxlanAttrs.VtepMAC)})
 					}); err != nil {
 						log.Error("AddARP failed: ", err)
 						continue
 					}
-                    // 增加fdb记录
+                    // 设置fdb
 					if err := retry.Do(func() error {
 						return nw.dev.AddFDB(neighbor{IP: attrs.PublicIP, MAC: net.HardwareAddr(vxlanAttrs.VtepMAC)})
 					}); err != nil {
-					    ...
+                        ...
 					}
 
 					// Set the route - the kernel would ARP for the Gw IP address if it hadn't already been set above so make sure
 					// this is done last.
-					// 增加路由记录
+					// 设置路由
 					if err := retry.Do(func() error {
 						return netlink.RouteReplace(&vxlanRoute)
 					}); err != nil {
@@ -231,7 +231,7 @@ func (nw *network) handleSubnetEvents(batch []subnet.Event) {
 			}
             ...
 		case subnet.EventRemoved:
-        ...
+            ...
 		default:
 			log.Error("internal error: unknown event type: ", int(event.Type))
 		}
