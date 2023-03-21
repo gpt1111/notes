@@ -119,7 +119,7 @@ func (m *LocalManager) tryAcquireLease(ctx context.Context, config *subnet.Confi
 
 ## backend.Manager 
 主机子网后端实现管理器
-```
+```go
 // 接口定义
 type Manager interface {
     GetBackend(backendType string) (Backend, error)
@@ -138,7 +138,7 @@ type manager struct {
 ```
 
 #### vxlan模式子网后端
-```
+```go
 type VXLANBackend struct {
     // 子网管理器
     subnetMgr subnet.Manager
